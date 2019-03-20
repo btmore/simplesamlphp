@@ -1,0 +1,511 @@
+<?php
+
+/**
+ * @file
+ * Contains module cat_app_catalog_list.
+ */
+
+use Drupal\Views\ViewExecutable;
+use Drupal\Core\Form\FormStateInterface;
+use Drupal\node\Entity\Node;
+use Drupal\Core\Entity\EntityInterface;
+use Drupal\Core\Url;
+
+/**
+ * Implements hook_views_pre_render().
+ */
+function cat_app_catalog_views_pre_render(ViewExecutable $view) {
+  // Update "alt" attribute value for each screenshot image of app catalog
+  // content before rendering as html on webpage (app catalog detail page).
+  // Check condition for view id = App catalog view & current display = block_1.
+  if ($view->id() == 'app_catalog_detail' && $view->current_display == 'block_1') {
+    $results = &$view->result;
+    foreach ($results as $result) {
+      // Get screenshots of app catalog content.
+      $field_screenshots = $result->_entity->get("field_screenshot")->getValue();
+      if (isset($field_screenshots)) {
+        // Get node id and node title.
+        $nid = $result->nid;
+        $node = Node::load($nid);
+        $nodeTitle = $node->getTitle();
+        $screenshot_delta = 'A';
+        // For each screenshot image,
+        // update "alt" field value in format "App Title - A".
+        // before rendering html for view on webpage.
+        foreach ($field_screenshots as $key => $screenshot) {
+          $altTitle = $nodeTitle . ' - ' . $screenshot_delta;
+          $field_screenshots[$key]['alt'] = $altTitle;
+          $screenshot_delta++;
+        }
+      }
+      $result->_entity->set('field_screenshot', $field_screenshots);
+    }
+  }
+}
+
+/**
+ * Implements hook_views_pre_view().
+ */
+function cat_app_catalog_views_pre_view(ViewExecutable $view, $display_id, array &$args) {
+  // Customize condition check for App Catalog List view.
+  // Condition check for id = App catalog view.
+  if ($view->id() == 'app_catalog_landing_view' && $view->current_display == 'page_1') {
+    $view->element['#attached']['library'][] = 'cat_app_catalog/cat_app_catalog_lib';
+    // Get all exposed input value.
+    $filter_input = $view->getExposedInput();
+    // Condition check the value array for field Androids taxonomy.
+    if ($filter_input['tid'] != NULL && $filter_input['tid'][35] == "35") {
+      // Assign the value array for field Android China taxonomy.
+      $field_select_android_china[56] = "56";
+      $filter_input["tid_4"] = $field_select_android_china;
+      // Save the value array in exposed input.
+      $view->setExposedInput($filter_input);
+    }
+    else {
+      // Remove the value array for field Android China taxonomy.
+      $field_select_android_china[56] = "56";
+      foreach ($filter_input as $key => $value) {
+        if ($key != "tid_4") {
+          $filter_input_all[$key] = $value;
+        }
+      }
+      // Save the value array in exposed input.
+      $view->setExposedInput($filter_input_all);
+    }
+  }
+  // Condition check for id = Unapproved/Approved/Rejected view.
+  elseif (($view->id() == 'my_apps_unapproved' && $view->current_display == 'my_apps_unapproved')
+    || ($view->id() == 'my_apps_approved' && $view->current_display == 'my_apps_approved')
+    || ($view->id() == 'my_apps_unapproved' && $view->current_display == 'my_apps_rejected')) {
+    // If logged in user's role is either admin or app-manager,
+    // then alter the contextual filter value from userId to 'all'.
+    // This will fetch all records of app catalog content type.
+    $user_roles = \Drupal::currentUser()->getRoles();
+    if (in_array('administrator', $user_roles) || in_array('app_catalog', $user_roles)) {
+      // Reset contextual filter value as 'all'.
+      // This will fetch all records of app catalog content.
+      $view->args[0] = 'all';
+    }
+  }
+}
+
+/**
+ * Implements hook_mail().
+ */
+function cat_app_catalog_mail($key, &$message, $params) {
+  switch ($key) {
+    case 'cat_app_catalog':
+      $message['from'] = \Drupal::config('system.site')->get('mail');
+      $message['subject'] = $params['subject'];
+      $message['body'][] = $params['message'];
+      break;
+  }
+}
+
+/**
+ * Implements hook_ENTITY_TYPE_insert().
+ */
+function cat_app_catalog_node_insert(EntityInterface $entity) {
+  // Compose emails to send when an app catalog content type node is added.
+  \Drupal::service('cat_app_catalog.emails')->createEmails($entity);
+}
+
+/**
+ * Implements hook_ENTITY_TYPE_update().
+ */
+function cat_app_catalog_node_update(EntityInterface $entity) {
+  // Compose emails to send when an app catalog content type node is updated.
+  \Drupal::service('cat_app_catalog.emails')->createEmails($entity);
+}
+
+/**
+ * Implements cat_app_catalog_form_alter().
+ */
+function cat_app_catalog_form_alter(&$form, FormStateInterface $form_state, $form_id) {
+  // Customize condition check for create node App Catalog form if form id
+  // is equal to = id of create node App Catalog  form.
+  if ($form_id == 'node_app_catalog_form' || $form_id == "node_app_catalog_edit_form") {
+    $form['field_os']['#type'] = 'hidden';
+    $form['field_os_type_for_ios']['#type'] = 'hidden';
+    $form['field_os_type_for_web_apps']['#type'] = 'hidden';
+    $form['field_select_android_china']['#type'] = 'hidden';
+
+    // Render basic page (App Submission Guidelines) content as popup,
+    // on create app catalog page ( /node/add/app_catalog ). This html will be
+    // hidden using css and laded automatically on app-catalog create page.
+    // Note - Do this for all users can create/edit own apps except Admin user.
+    $user_roles = \Drupal::currentUser()->getRoles();
+    if (!in_array('administrator', $user_roles)) {
+      $config = \Drupal::config('cat_app_catalog.settings');
+      $nid = $config->get('nodeId');
+      $node = Node::load($nid);
+      if (!is_null($node) && $node->hasField('body')) {
+        $node_content = $node->get('body')->getValue()[0]['value'];
+        $node_content_hidden = '<a id="a-app-submission-popup" data-colorbox-inline="#app-submission-guidelines" data-width="75%" data-height="95%">Open Popup</a>';
+        $node_content_hidden .= '<div id="app-submission-guidelines-main">';
+        $node_content_hidden .= '<div id="app-submission-guidelines">';
+        $node_content_hidden .= $node_content;
+        $node_content_hidden .= '</div></div>';
+        $form['text']['#markup'] = $node_content_hidden;
+      }
+    }
+
+    // This line adds a new validation function.
+    $form['#validate'][] = 'validate_app_catalog_form';
+
+    // By deafult, content moderation dropdown is shown for all users.
+    // Check if user has permission to approve app catalog contents.
+    // If no, hide content moderation dropdown on app-catalog create/edit page.
+    if (!(\Drupal::currentUser()->hasPermission('use editorial transition publish'))) {
+      // Apply custom css class to moderation-state field and hide
+      // current-state & moderation-state on app catalog create/edit form.
+      $form['moderation_state']['#attributes']['class'][] = 'hide-moderation-state-app-catalog';
+    }
+
+    // Update configurations on Edit App Catalog page only.
+    if ($form_id == 'node_app_catalog_edit_form') {
+      // Get current node id.
+      $node = \Drupal::routeMatch()->getParameter('node');
+      $nid = $node->id();
+
+      // Change destination parameter to knowledge-hub forum landing page.
+      $query_parameters = ['node' => $nid, 'destination' => '/app-catalog/my-apps'];
+      $url = Url::fromRoute('entity.node.delete_form', $query_parameters);
+
+      // Set new url for delete link on forum post edit form.
+      $form['actions']['delete']['#url'] = $url;
+    }
+
+  }
+  // Customize condition check for Flag this App and change select one
+  // instead of None in Reason field.
+  if ($form_id == 'flagging_flag_this_app_add_form' || $form_id == 'flagging_flag_this_app_edit_form') {
+    $form['field_reason']['widget']['#options']['_none'] = 'Select one';
+  }
+  // Customize condition check for Caterpillar, dealer roles only
+  // in Select Publisher filter App catalog landing page.
+  if ($form_id == 'views_exposed_form' && $form['#id'] == 'views-exposed-form-app-catalog-landing-view-page-1') {
+    $get_all_roles = $form["roles_target_id"]["#options"];
+    foreach ($get_all_roles as $key => $value) {
+      if ($key == "dealer" || $key == "cat_employee") {
+        $get_specific_role[$key] = $value;
+      }
+    }
+    $form["roles_target_id"]["#options"] = NULL;
+    $form["roles_target_id"]["#options"] = $get_specific_role;
+    // Customize include all taxonomy(android,ios,web) in one Select OS Type
+    // App catalog landing page.
+    $get_filter_os_type = [];
+    $get_android_filter = $form["tid"]["#options"];
+    foreach ($get_android_filter as $key => $value) {
+      $get_filter_os_type[$key] = $value;
+    }
+    $get_ios_filter = $form["tid_1"]["#options"];
+    foreach ($get_ios_filter as $key => $value) {
+      $get_filter_os_type[$key] = $value;
+    }
+    $get_web_filter = $form["tid_2"]["#options"];
+    foreach ($get_web_filter as $key => $value) {
+      $get_filter_os_type[$key] = $value;
+    }
+    $form["tid"]["#options"] = NULL;
+    $form["tid"]["#options"] = $get_filter_os_type;
+  }
+}
+
+/**
+ * Custom validation function.
+ */
+function validate_app_catalog_form(&$form, FormStateInterface &$form_state) {
+  // Validate if app catalog title exists in database to avoid duplicate apps.
+  // Perform this validation only when app-catalog content is being
+  // created/updated and not when being moderating.
+  $moderation_state = $form['moderation_state']['widget'][0]['state']['#value'];
+  $current_entity = $form_state->getFormObject()->getEntity();
+  if ($moderation_state === 'draft' || ($moderation_state != 'draft' && $current_entity->isNew())) {
+    // Get App Catalog title (app name) value from form.
+    $node_title = $form_state->getValue('title') != NULL ? $form_state->getValue('title')[0]['value'] : "";
+
+    if (!empty(trim($node_title))) {
+      // Initialize node-type and validation-message variables.
+      $node_type = "app_catalog";
+      $validation_message = t('An app catalog entry with name "@name" already exists. Please update your app catalog entry to have a unique name.', ["@name" => $node_title]);
+
+      // **** Node ***.
+      // If there is any app-catalog with same title as user submitted
+      // then below if loop code will handle this scenario.
+      // **** Node ***.
+      // Check if there is any app-catalog content with
+      // 1. node title = user-submitted title.
+      $query_node = db_select('node_field_data', 'n')
+        ->fields('n', ['nid'])
+        ->condition('n.type', $node_type, '=')
+        ->condition('n.title', $node_title, '=');
+      $row_count = $query_node->countQuery()->execute()->fetchField();
+
+      // If app-title exists, then validate app-title
+      // duplicate possibility based upon entity type (new or existing)
+      // and return validation message as required.
+      if (((int) $row_count) > 0) {
+        if (!$current_entity->isNew() && ((int) $row_count) == 1) {
+          // *** Operation Edit ***.
+          // If app-catalog is existing one and
+          // 1. user is trying to update app-title same as other app title,
+          //    then return validation message.
+          // 2. user is trying to update other fields than app-title of original
+          //    app-catalog then check 'db-entity nid' != 'current-entity nid'
+          //    to bypass validation and update requested fields smoothly.
+          $results = $query_node->execute()->fetchAll();
+          if ($results[0]->nid != $current_entity->id()) {
+            $form_state->setErrorByName('title', $validation_message);
+          }
+        }
+        else {
+          // 1. If app-catalog is new app or
+          // 2. app-title count is count more than 1
+          // then simply return validation message.
+          // The point 2 scenario is very rare and it may never happen.
+          $form_state->setErrorByName('title', $validation_message);
+        }
+      }
+      else {
+        // **** Revision ***.
+        // If there is any appcatalog revision with same title as user submitted
+        // and it is in still in pending state (not moderated)
+        // then below code will handle this scenario.
+        // **** Revision ***.
+        // Check if there is any app-catalog revision with
+        // 1. revision title = user-submitted title
+        // 2. revision status = Not Published.
+        $query_node_revision = db_select('node_field_data', 'n');
+        $query_node_revision->join('node_field_revision', 'r', 'r.nid = n.nid');
+        $query_node_revision->fields('n', ['nid', 'changed'])
+          ->condition('n.type', $node_type, '=')
+          ->condition('r.title', $node_title, '=')
+          ->condition('r.status', 0, '=');
+        $row_count = $query_node_revision->countQuery()->execute()->fetchField();
+        // If there is any app-title record in 'node_field_revision',
+        // then check if there is any revision with date-time is greater than
+        // current revision's date-time.
+        if (((int) $row_count) > 0) {
+          // Get distinct nid and it's changed-time.
+          $results = $query_node_revision->distinct()->execute()->fetchAll();
+          // Process all revisions to validate duplicate names.
+          foreach ($results as $result) {
+            // Get node.
+            $node_nid = $result->nid;
+            // Get node's current revision's updated datetime.
+            $node_changed = $result->changed;
+
+            // Check if there is any revision with
+            // 1. revision nid = db-fetched nid
+            // 2. revision title = user-submitted title
+            // 3. revision date-time > current revision date-time
+            // 4. revision status = Not Published.
+            $query_revision = db_select('node_field_revision', 'r');
+            $query_revision->fields('r', ['nid', 'vid'])
+              ->condition('r.nid', $node_nid, '=')
+              ->condition('r.title', $node_title, '=')
+              ->condition('r.changed', $node_changed, '>')
+              ->condition('r.status', 0, '=');
+            $revision_count = $query_revision->countQuery()->execute()->fetchField();
+
+            // If any revision is found, then validate app-title
+            // duplicate possibility based upon entity type (new or existing)
+            // and return validation message as required.
+            if (((int) $revision_count) > 0) {
+              if (!$current_entity->isNew()) {
+                // *** Operation Edit ***.
+                // If app-catalog is existing one and
+                // 1. user is trying to update app-title same as other app title
+                //    then return validation message.
+                // 2. user is trying to update other fields than app-title,
+                //    then just check 'db-entity nid' != 'current-entity nid'
+                //    to bypass validation and update requested fields smoothly.
+                if ($node_nid != $current_entity->id()) {
+                  // Add valiation message to form.
+                  $form_state->setErrorByName('title', $validation_message);
+                  // If validation message is added to form-state at least once,
+                  // break the for loop as this is violating unique name policy.
+                  break;
+                }
+              }
+              else {
+                // 1. If app-catalog is new app or
+                // 2. app-title count is count more than 1
+                // then simply return validation message.
+                // The point 2 scenario is very rare and it may never happen.
+                $form_state->setErrorByName('title', $validation_message);
+                // If validation message is added to form-state, at least once,
+                // break the for loop as this is violating unique name policy.
+                break;
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  // Validate if app catalog Android, Android China, WebApps and iOS fields.
+  // Get Android section field values.
+  $android_url = $form_state->getValue('field_googlepla') != NULL ? $form_state->getValue('field_googlepla')[0]["uri"] : "";
+  $android_size = $form_state->getValue('field_androidsize') != NULL ? $form_state->getValue('field_androidsize')[0]["value"] : "";
+  $android_version = $form_state->getValue('field_android_') != NULL ? $form_state->getValue('field_android_')[0]["value"] : "";
+
+  // Get Android China section field values.
+  $android_china_url = $form_state->getValue('field_android_china_url') != NULL ? $form_state->getValue('field_android_china_url')[0]["uri"] : "";
+  $android_china_size = $form_state->getValue('field_android_china_size') != NULL ? $form_state->getValue('field_android_china_size')[0]["value"] : "";
+  $android_china_version = $form_state->getValue('field_android_china_min_ver_v2') != NULL ? $form_state->getValue('field_android_china_min_ver_v2')[0]["value"] : "";
+
+  // Get iOS section field values.
+  $ios_url = $form_state->getValue('field_itunes') != NULL ? $form_state->getValue('field_itunes')[0]["uri"] : "";
+  $ios_size = $form_state->getValue('field_io') != NULL ? $form_state->getValue('field_io')[0]["value"] : "";
+  $ios_version = $form_state->getValue('field_ios') != NULL ? $form_state->getValue('field_ios')[0]["value"] : "";
+
+  // Get Web App section field values.
+  $webapp_url = $form_state->getValue('field_windows_store_url') != NULL ? $form_state->getValue('field_windows_store_url')[0]["uri"] : "";
+
+  // App store details for atleast one of Android, Android China, iOS
+  // or Web App are mandatory.
+  if (empty($webapp_url)) {
+    if (empty($android_url) && empty($android_size) && empty($android_version) &&
+      empty($android_china_url) && empty($android_china_size) && empty($android_china_version) &&
+      empty($ios_url) && empty($ios_size) && empty($ios_version)) {
+      $form_state->setErrorByName('', t("At least one of the following sections must be completely filled out: Android, Android China, iOS or Web App."));
+    }
+    else {
+      validate_app_store_fields($form_state, $android_url, $android_size, $android_version, $android_china_url, $android_china_size, $android_china_version, $ios_url, $ios_size, $ios_version);
+    }
+  }
+  else {
+    validate_app_store_fields($form_state, $android_url, $android_size, $android_version, $android_china_url, $android_china_size, $android_china_version, $ios_url, $ios_size, $ios_version);
+  }
+
+  // If there are any validation errors on app catalog submit,
+  // don't show app catalog submission guidelines again on page reload.
+  // For this, clear app catalog submission guidelines popup html from page.
+  $errors = $form_state->getErrors();
+  if (count($errors) > 0) {
+    $form['text']['#markup'] = '';
+  }
+}
+
+/**
+ * Function to validate app store fields only.
+ */
+function validate_app_store_fields($form_state, $android_url, $android_size, $android_version, $android_china_url, $android_china_size, $android_china_version, $ios_url, $ios_size, $ios_version) {
+  // If any one field inside Android section is filled, all fields inside that
+  // section are mandatory to fill.
+  $android_fields = ['field_googlepla', 'field_androidsize', 'field_android_'];
+  $android_validation_message = "If any field under Android section is populated, all fields under that section must be populated.";
+  if (!(empty($android_url) && empty($android_size) && empty($android_version))) {
+    if (empty($android_url)) {
+      $form_state->setErrorByName($android_fields[0], $android_validation_message);
+    }
+    if (empty($android_size)) {
+      $form_state->setErrorByName($android_fields[1], $android_validation_message);
+    }
+    if (empty($android_version)) {
+      $form_state->setErrorByName($android_fields[2], $android_validation_message);
+    }
+  }
+
+  // If any one field inside Android China section is filled,
+  // all fields inside that section are mandatory to fill.
+  $android_china_fields = ['field_android_china_url',
+    'field_android_china_size',
+    'field_android_china_min_ver_v2',
+  ];
+  $android_china_validation_message = "If any field under Android China section is populated, all fields under that section must be populated.";
+  if (!(empty($android_china_url) && empty($android_china_size) && empty($android_china_version))) {
+    if (empty($android_china_url)) {
+      $form_state->setErrorByName($android_china_fields[0], $android_china_validation_message);
+    }
+    if (empty($android_china_size)) {
+      $form_state->setErrorByName($android_china_fields[1], $android_china_validation_message);
+    }
+    if (empty($android_china_version)) {
+      $form_state->setErrorByName($android_china_fields[2], $android_china_validation_message);
+    }
+  }
+
+  // If any one field inside iOS section is filled, all fields inside that
+  // section are mandatory to fill.
+  $ios_fields = ['field_itunes', 'field_io', 'field_ios'];
+  $ios_validation_message = "If any field under iOS section is populated, all fields under that section must be populated.";
+  if (!(empty($ios_url) && empty($ios_size) && empty($ios_version))) {
+    if (empty($ios_url)) {
+      $form_state->setErrorByName($ios_fields[0], $ios_validation_message);
+    }
+    if (empty($ios_size)) {
+      $form_state->setErrorByName($ios_fields[1], $ios_validation_message);
+    }
+    if (empty($ios_version)) {
+      $form_state->setErrorByName($ios_fields[2], $ios_validation_message);
+    }
+  }
+}
+
+/**
+ * Implements hook_entity_presave().
+ *
+ * Before Drupal saves the entity, it will run this code.
+ */
+function cat_app_catalog_entity_presave(EntityInterface $entity) {
+  // Customize condition check for App Catalog.
+  if ($entity->bundle() == 'app_catalog') {
+    // Get the value array for field Androids.
+    $android_google_play = $entity->get("field_googlepla")->getValue();
+    $field_os = $entity->get("field_os")->getValue();
+    if ($android_google_play != []) {
+      // Save the value array to Android checkbox entity.
+      $field_os[0]['target_id'] = '35';
+      $entity->set('field_os', $field_os);
+    }
+    if ($android_google_play == []) {
+      // Save the value array back to entity.
+      $field_os = [];
+      $entity->set('field_os', $field_os);
+    }
+    // Get the value array for field IOS.
+    $ios_itune_url = $entity->get("field_itunes")->getValue();
+    $field_os_type_for_ios = $entity->get("field_os_type_for_ios")->getValue();
+    if ($ios_itune_url != []) {
+      // Save the value array to IOS checkbox entity.
+      $field_os_type_for_ios[0]['target_id'] = '46';
+      $entity->set('field_os_type_for_ios', $field_os_type_for_ios);
+    }
+    if ($ios_itune_url == []) {
+      // Save the value array back to entity.
+      $field_os_type_for_ios = [];
+      $entity->set('field_os_type_for_ios', $field_os_type_for_ios);
+    }
+    // Get the value array for field Web App url.
+    $windows_store_url = $entity->get("field_windows_store_url")->getValue();
+    $field_os_type_for_web_apps = $entity->get("field_os_type_for_web_apps")->getValue();
+    if ($windows_store_url != []) {
+      // Save the value array to Web App checkbox entity.
+      $field_os_type_for_web_apps[0]['target_id'] = '37';
+      $entity->set('field_os_type_for_web_apps', $field_os_type_for_web_apps);
+    }
+    if ($windows_store_url == []) {
+      // Save the value array back to entity.
+      $field_os_type_for_web_apps = [];
+      $entity->set('field_os_type_for_web_apps', $field_os_type_for_web_apps);
+    }
+    // Get the value array for field  Android China.
+    $android_china_url = $entity->get("field_android_china_url")->getValue();
+    $field_select_android_china = $entity->get("field_select_android_china")->getValue();
+    if ($android_china_url != []) {
+      // Save the value array to Web App checkbox entity.
+      $field_select_android_china[0]['target_id'] = '56';
+      $entity->set('field_select_android_china', $field_select_android_china);
+    }
+    if ($android_china_url == []) {
+      // Save the value array back to entity.
+      $field_select_android_china = [];
+      $entity->set('field_select_android_china', $field_select_android_china);
+    }
+  }
+}
