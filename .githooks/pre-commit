@@ -1,5 +1,4 @@
-#!/bin/bash
-#!/bin/sh
+#!C:/Program\ Files/Git/usr/bin/sh.exe
 
 # Redirect output to stderr.
 exec 1>&2
